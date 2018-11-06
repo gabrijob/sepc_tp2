@@ -8,6 +8,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include "variante.h"
 #include "readcmd.h"
@@ -58,6 +61,79 @@ void terminate(char *line) {
 	exit(0);
 }
 
+//----------Background commands functions--------------
+struct bg_proc *bg_proc_list = NULL;
+
+void add_bg_cmd(pid_t pid, char** cmd) {
+	struct bg_proc *aux = bg_proc_list;
+
+	//empty list
+	if(aux == NULL) {
+		aux = (struct bg_proc *) malloc(sizeof(struct bg_proc));
+		aux->pid = pid;
+		aux->cmd = (char*) malloc(strlen(cmd[0])*sizeof(char));
+		for(int i = 0; cmd[i] != 0; i++) {
+
+		}
+		aux->cmd = (char *) malloc(sizeof(char));
+		strcpy(aux->cmd, cmd[0]);
+		aux->next = NULL;
+		bg_proc_list = aux;
+	}
+	else {
+		//not empty
+		while (aux->next != NULL){
+			aux = aux->next;
+		}
+		aux->next = (struct bg_proc *) malloc(sizeof(struct bg_proc));
+		aux = aux->next;
+		aux->pid = pid;
+		aux->cmd = (char *) malloc(sizeof(char));
+		strcpy(aux->cmd, cmd[0]);
+		aux->next = NULL;
+	}
+}
+
+int remove_bg_cmd(pid_t pid) {
+	struct bg_proc *aux = bg_proc_list;
+	struct bg_proc *prev = NULL;
+	int found = 0;
+
+	while (aux != NULL && found == 0){
+		if(aux->pid == pid)
+			found = 1;
+		else {
+			prev = aux;
+			aux = aux->next;
+		}
+	}
+	if(found) {
+		if(prev) prev->next = aux->next;
+		else bg_proc_list = NULL; //if found is the first element
+		free(aux);
+		return 1;
+	}
+	else return 0;
+}
+
+void jobs(void) {
+	struct bg_proc *aux = bg_proc_list;
+	int status;
+	
+	for(int i = 1; aux != NULL; i++){
+		printf("\n[%d] %s", i, aux->cmd);
+		if(waitpid(aux->pid, &status, WNOHANG) == 0) {
+			printf(" Running\n");
+		}
+		else {
+			remove_bg_cmd(aux->pid);
+			printf(" Terminated\n");
+		}
+		aux = aux->next; 
+	}
+}
+
+//----------------------------------------------------
 
 int main() {
         printf("Variante %d: %s\n", VARIANTE, VARIANTE_STRING);
@@ -71,7 +147,7 @@ int main() {
 	while (1) {
 		struct cmdline *l;
 		char *line=0;
-		int i, j;
+		int i/*, j*/;
 		char *prompt = "ensishell>";
 
 		/* Readline use some internal memory structure that
@@ -120,13 +196,31 @@ int main() {
 		if (l->bg) printf("background (&)\n");
 
 		/* Display each command of the pipe */
-		for (i=0; l->seq[i]!=0; i++) {
+		/*for (i=0; l->seq[i]!=0; i++) {
 			char **cmd = l->seq[i];
 			printf("seq[%d]: ", i);
-                        for (j=0; cmd[j]!=0; j++) {
-                                printf("'%s' ", cmd[j]);
-                        }
+                for (j=0; cmd[j]!=0; j++) {
+                    printf("'%s' ", cmd[j]);
+                }
 			printf("\n");
+		}*/
+
+		for (i=0; l->seq[i]!=0; i++) {
+			char **cmd = l->seq[i];
+			int status;
+			pid_t pid;
+			if(!(pid=fork())) {
+				execvp(cmd[0], cmd);
+				return 0;
+			} else {
+				if(! l->bg) {
+					waitpid(pid,&status,0);
+				}
+				else {
+					add_bg_cmd(pid, cmd);	
+				}
+				jobs();
+			}
 		}
 	}
 
